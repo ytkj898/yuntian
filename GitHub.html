@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=0" name="viewport">
+    <meta content="yes" name="apple-mobile-web-app-capable">
+    <meta content="yes" name="apple-touch-fullscreen">
+    <meta content="black" name="apple-mobile-web-app-status-bar-style">
+    <meta content="320" name="MobileOptimized">
+    <title>...</title>
+    <style>
+        /* 基础重置 确保无默认边距 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #ffffff;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            font-family: "Microsoft Yahei", "PingFang SC", sans-serif;
+        }
+
+        /* 三色小球动画容器 - 居中显示，优化移动端视觉 */
+        .container {
+            width: 100px;
+            height: 100px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation: rotate-move 2s ease-in-out infinite;
+        }
+        .dot {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            margin: auto;
+        }
+        /* 品牌化配色 视觉更舒适 */
+        .dot-1 { background-color: #2563eb; animation: dot-1-move 2s ease infinite; }
+        .dot-2 { background-color: #10b981; animation: dot-2-move 2s ease infinite; }
+        .dot-3 { background-color: #f59e0b; animation: dot-3-move 2s ease infinite; }
+
+        /* 小球动画关键帧 - 流畅无卡顿，适配移动端 */
+        @keyframes dot-3-move { 
+            20% { transform: scale(1) } 
+            45% { transform: translateY(-18px) scale(.45) } 
+            60% { transform: translateY(-25px) scale(.45) } 
+            80% { transform: translateY(-25px) scale(.45) } 
+            100% { transform: translateY(0px) scale(1) } 
+        }
+        @keyframes dot-2-move { 
+            20% { transform: scale(1) } 
+            45% { transform: translate(-16px, 12px) scale(.45) } 
+            60% { transform: translate(-20px, 15px) scale(.45) } 
+            80% { transform: translate(-20px, 15px) scale(.45) } 
+            100% { transform: translateY(0px) scale(1) } 
+        }
+        @keyframes dot-1-move { 
+            20% { transform: scale(1) } 
+            45% { transform: translate(16px, 12px) scale(.45) } 
+            60% { transform: translate(20px, 15px) scale(.45) } 
+            80% { transform: translate(20px, 15px) scale(.45) } 
+            100% { transform: translateY(0px) scale(1) } 
+        }
+        @keyframes rotate-move { 
+            55% { transform: translate(-50%, -50%) rotate(0deg) } 
+            80% { transform: translate(-50%, -50%) rotate(360deg) } 
+            100% { transform: translate(-50%, -50%) rotate(360deg) } 
+        }
+
+        /* iframe全屏样式 - 覆盖整个视口 */
+        .content {
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            border: none;
+            display: none;
+            z-index: 10;
+        }
+        .content.show { display: block; }
+
+        /* 错误提示样式 - 醒目且适配移动端 */
+        .error-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ffebee;
+            border-left: 4px solid #ef4444;
+            color: #c62828;
+            padding: 15px 20px;
+            border-radius: 8px;
+            max-width: 85%;
+            width: 320px;
+            font-size: 14px;
+            line-height: 1.6;
+            display: none;
+            z-index: 20;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+        }
+        .error-message.show { display: block; }
+        .error-message strong {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 6px;
+            color: #b71c1c;
+        }
+        /* 过期提示额外样式 */
+        .expire-tip {
+            font-size: 12px;
+            margin-top: 8px;
+            color: #8e0000;
+        }
+    </style>
+</head>
+<body>
+    <!-- 三色小球加载动画 -->
+    <div class="container" id="loading-animation">
+        <div class="dot dot-1"></div>
+        <div class="dot dot-2"></div>
+        <div class="dot dot-3"></div>
+    </div>
+
+    <!-- 错误提示面板 -->
+    <div class="error-message" id="error-box">
+        <strong⚠️ 跳转失败</strong>
+        <span id="error-text"></span>
+    </div>
+
+    <!-- 目标URL承载iframe（全屏） -->
+    <iframe class="content" id="target-iframe" sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-top-navigation"></iframe>
+
+    <script>
+        // ============ 全局配置（统一管理，方便修改） ============
+        const CONFIG = {
+            jumpDelay: 1200,       // 跳转延迟（毫秒），缩短至1.2秒提升体验
+            safeProtocols: ['http:', 'https:'], // 仅允许安全协议，防XSS
+            // 适配后端safe_base64_encode的替换规则
+            base64ReplaceMap: {
+                encode: { '+': '-', '/': '_', '=': '' },
+                decode: { '-': '+', '_': '/' }
+            }
+        };
+
+        // ============ 核心工具函数 ============
+        /**
+         * 安全Base64解码（适配后端的safe_base64_encode）
+         * @param {string} str 加密后的Base64字符串
+         * @returns {string|null} 解码结果，失败返回null
+         */
+        function safeBase64Decode(str) {
+            try {
+                // 1. 还原被替换的字符
+                let restored = str;
+                for (const [oldChar, newChar] of Object.entries(CONFIG.base64ReplaceMap.decode)) {
+                    restored = restored.replace(new RegExp(oldChar, 'g'), newChar);
+                }
+                // 2. 补全Base64缺失的等号
+                const padding = restored.length % 4;
+                if (padding > 0) {
+                    restored += '='.repeat(4 - padding);
+                }
+                // 3. 解码并处理中文
+                return decodeURIComponent(escape(atob(restored)));
+            } catch (e) {
+                console.error('Base64解码失败:', e);
+                return null;
+            }
+        }
+
+        /**
+         * 显示错误提示
+         * @param {string} msg 错误信息（支持HTML）
+         */
+        function showError(msg) {
+            document.getElementById('error-text').innerHTML = msg;
+            document.getElementById('error-box').classList.add('show');
+            document.getElementById('loading-animation').style.display = 'none';
+        }
+
+        /**
+         * 校验URL合法性
+         * @param {string} url 目标URL
+         * @returns {boolean} 是否合法
+         */
+        function isValidUrl(url) {
+            if (!url) return false;
+            try {
+                const urlObj = new URL(url);
+                return CONFIG.safeProtocols.includes(urlObj.protocol);
+            } catch (e) {
+                return false;
+            }
+        }
+
+        /**
+         * 执行跳转（隐藏动画，显示iframe）
+         * @param {string} url 目标URL
+         */
+        function redirectToTarget(url) {
+            // 隐藏加载动画
+            document.getElementById('loading-animation').style.display = 'none';
+            // 加载并显示iframe
+            const iframe = document.getElementById('target-iframe');
+            iframe.src = url;
+            iframe.classList.add('show');
+            console.log(`[跳转成功] 目标地址: ${url}`);
+        }
+
+        /**
+         * 检测链接是否过期
+         * @param {object} linkData 链接数据（包含created、expire_days）
+         * @returns {object} { isExpired: boolean, expireTime: number, expireDate: string }
+         */
+        function checkLinkExpire(linkData) {
+            const now = Math.floor(Date.now() / 1000); // 当前时间戳（秒）
+            let expireTime = 0;
+            let expireDate = '';
+            
+            // 永久有效（9999天）
+            if (linkData.expire_days >= 9999) {
+                return { isExpired: false };
+            }
+
+            // 计算过期时间
+            if (linkData.created && linkData.expire_days) {
+                expireTime = linkData.created + (linkData.expire_days * 86400);
+                expireDate = new Date(expireTime * 1000).toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+
+            return {
+                isExpired: now > expireTime,
+                expireTime,
+                expireDate
+            };
+        }
+
+        // ============ 核心业务逻辑 ============
+        (function init() {
+            // 1. 解析URL参数c（防红链接的核心参数）
+            const urlParams = new URLSearchParams(window.location.search);
+            const encodedParam = urlParams.get('c');
+            
+            // 2. 参数缺失检测
+            if (!encodedParam) {
+                showError('缺少参数<br><small>请检查链接是否完整，或联系管理员KMHSLXS授权</small>');
+                return;
+            }
+
+            // 3. Base64解码
+            const decodedStr = safeBase64Decode(encodedParam);
+            if (!decodedStr) {
+                showError('链接解析失败<br><small>链接可能已损坏、被篡改，或格式不支持</small>');
+                return;
+            }
+
+            // 4. 解析链接数据（兼容JSON格式和纯URL）
+            let linkData = null;
+            let targetUrl = '';
+            try {
+                // 优先解析为JSON（包含过期信息）
+                linkData = JSON.parse(decodedStr);
+                targetUrl = linkData.url || '';
+            } catch (e) {
+                // 非JSON则视为纯URL
+                targetUrl = decodedStr;
+                linkData = { url: targetUrl, expire_days: 9999 }; // 默认为永久有效
+            }
+
+            // 5. 过期检测
+            if (linkData.created && linkData.expire_days) {
+                const expireCheck = checkLinkExpire(linkData);
+                if (expireCheck.isExpired) {
+                    showError(`
+                        链接已过期<br>
+                        过期时间：${expireCheck.expireDate}
+                        <div class="expire-tip">请联系管理员KMHSLXS授权</div>
+                    `);
+                    return;
+                }
+            }
+
+            // 6. URL合法性校验
+            if (!isValidUrl(targetUrl)) {
+                showError('目标链接不合法<br><small>仅支持http/https安全协议的链接</small>');
+                return;
+            }
+
+            // 7. 延迟跳转（动画展示完成）
+            setTimeout(() => {
+                redirectToTarget(targetUrl);
+            }, CONFIG.jumpDelay);
+        })();
+
+        // ============ 兼容处理：iframe鼠标滚轮（适配多浏览器） ============
+        (function bindIframeWheel() {
+            const isFirefox = navigator.userAgent.indexOf('Firefox') !== -1;
+            const iframe = document.getElementById('target-iframe');
+
+            /**
+             * 处理滚轮事件
+             * @param {Event} e 滚轮事件
+             * @param {Document} doc iframe文档对象
+             */
+            function handleMouseWheel(e, doc) {
+                e.preventDefault ? e.preventDefault() : (e.returnValue = false);
+                const isUp = isFirefox && e.detail < 0 || e.wheelDelta > 0;
+                const scrollStep = isUp ? -50 : 50;
+                doc.body.scrollTop = doc.documentElement.scrollTop += scrollStep;
+            }
+
+            /**
+             * 绑定iframe滚轮事件
+             * @param {HTMLIFrameElement} ifr iframe元素
+             */
+            function bindWheel(ifr) {
+                try {
+                    const doc = ifr.contentWindow.document;
+                    if (isFirefox) {
+                        doc.addEventListener('DOMMouseScroll', (e) => handleMouseWheel(e, doc), false);
+                    } else {
+                        doc.onmousewheel = (e) => handleMouseWheel(e || ifr.contentWindow.event, doc);
+                    }
+                } catch (e) {
+                    // 跨域时忽略（不弹窗干扰用户）
+                    console.warn('iframe滚轮绑定失败（跨域）:', e);
+                }
+            }
+
+            // iframe加载完成后绑定滚轮
+            iframe.onload = () => bindWheel(iframe);
+        })();
+    </script>
+</body>
+</html>
